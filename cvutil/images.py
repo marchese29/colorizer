@@ -1,6 +1,8 @@
 import cv2
 from cv2 import cv
+import matplotlib.pyplot as plt
 import numpy as np
+from skimage.segmentation import mark_boundaries
 from skimage.segmentation import slic
 
 class BadImageError(Exception):
@@ -77,4 +79,11 @@ class Image(object):
         return self._raw
 
     def display(self, superpixels=False):
-        pass
+        fig = plt.figure('Image: (%d, %d)' % (self._raw.shape[0], self._raw.shape[1]))
+        ax = fig.add_subplot(1, 1, 1)
+        if superpixels:
+            ax.imshow(mark_boundaries(self._raw, self._segments))
+        else:
+            ax.imshow(self._raw)
+        plt.axis('off')
+        plt.show()
