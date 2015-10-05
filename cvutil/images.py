@@ -1,34 +1,80 @@
 import cv2
 from cv2 import cv
-from skimage.util import img_as_float
-from skimage import io
+import numpy as np
+from skimage.segmentation import slic
 
 class BadImageError(Exception):
     pass
 
+class NotColorError(AttributeError):
+    pass
+
 class Image(object):
+    class Superpixel(object):
+        def __init__(self, image, indices):
+            self._image = image
+            self._indices = indices
+            self._coordinates = np.nonzero(indices)
+            self._size = np.count_nonzero(indices)
+
+            # Calculate the average color for this pixel
+            if image._color:
+                lumin = np.median(self._image._labimage[:,:,0][indices].astype(np.int64))
+                alpha = np.median(self._image._labimage[:,:,1][indices].astype(np.int64))
+                beta  = np.median(self._image._labimage[:,:,2][indices].astype(np.int64))
+                self._median_color = (alpha, beta)
+            else:
+                lumin = np.median(self._image._raw[indices].astype(np.int64))
+
+            self._median_intensity = lumin
+
+        @property
+        def median_color(self):
+            if self._image._color:
+                return self._median_color
+            else:
+                raise NotColorError('Attempted color access of grayscale superpixel.')
+
+        @property
+        def median_intensity(self):
+            return self._median_intensity
+
+    def _configure_superpixels(self):
+        num_pixels = self._raw.shape[0] * self._raw.shape[1]
+        if self._color:
+            self._segments = slic(self._raw, convert2lab=True, sigma=3,
+                n_segments=num_pixels / 50.0)
+        else:
+            self._segments = slic(self._raw, sigma=3, n_segments=num_pixels / 50.0)
+
+        # Create the superpixel objects.
+        self._superpixels = []
+        for i in xrange(np.max(self._segments)):
+            indices = (self._segments == i)
+            self._superpixels.append(Image.Superpixel(self, indices))
+
     def __init__(self, path, color=False):
         self._path = path
         self._color = color
-        self._skimage = img_as_float(io.imread(self._path, as_grey=self._color))
         if self._color:
-            self._cvimage = cv2.imread(path, cv.CV_LOAD_IMAGE_COLOR)
+            self._raw = cv2.cvtColor(cv2.imread(path, cv.CV_LOAD_IMAGE_COLOR), cv.CV_BGR2RGB)
         else:
-            self._cvimage = cv2.imread(path, cv.CV_LOAD_IMAGE_GRAYSCALE)
-        if self._cvimage is None:
+            self._raw = cv2.imread(path, cv.CV_LOAD_IMAGE_GRAYSCALE)
+
+        if self._raw is None:
             raise BadImageError()
 
-    @property
-    def skimage(self):
-        return self._skimage
+        if color:
+            self._labimage = cv2.cvtColor(self._raw, cv.CV_RGB2Lab)
+
+        self._configure_superpixels()
+
+    def __iter__(self):
+        return iter(self._superpixels)
 
     @property
-    def cvimage(self):
-        return self._cvimage
+    def raw(self):
+        return self._raw
 
-    @property
-    def color(self):
-        return self._color
-    
-    
-    
+    def display(self, superpixels=False):
+        pass
