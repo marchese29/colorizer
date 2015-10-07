@@ -87,4 +87,5 @@ class Image(object):
         else:
             ax.imshow(self._raw, cmap=plt.cm.gray, vmin=0, vmax=255)
         plt.axis('off')
+        plt.ion()
         plt.show()
