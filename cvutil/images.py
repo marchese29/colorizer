@@ -44,9 +44,11 @@ class Image(object):
     def _configure_superpixels(self):
         num_pixels = self._raw.shape[0] * self._raw.shape[1]
         if self._color:
-            self._segments = slic(self._raw, convert2lab=True, n_segments=num_pixels / 50.0)
+            self._segments = slic(self._raw, convert2lab=True, n_segments=num_pixels / 50,
+                enforce_connectivity=True)
         else:
-            self._segments = slic(self._raw, n_segments=num_pixels / 50.0)
+            self._segments = slic(self._raw, n_segments=num_pixels / 50, compactness=0.1,
+                enforce_connectivity=True)
 
         # Create the superpixel objects.
         self._superpixels = []
@@ -83,6 +85,6 @@ class Image(object):
         if superpixels:
             ax.imshow(mark_boundaries(self._raw, self._segments))
         else:
-            ax.imshow(self._raw)
+            ax.imshow(self._raw, cmap=plt.cm.gray, vmin=0, vmax=255)
         plt.axis('off')
         plt.show()
