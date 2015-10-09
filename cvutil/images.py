@@ -1,3 +1,17 @@
+'''
+Provides a utility for loading images with several important up-front data extractions.
+Images in this library can be iterated over:
+    for superpixel in image:
+        <Use the Superpixel>
+
+Each superpixel has a median_color property (for color images), and a median_intensity property.
+
+To retrieve the raw data extracted using OpenCV (in RGB form for color images), use the image's
+'raw' property.  Note that the use of the raw underlying image is heavily discouraged.
+
+Additionally, one can display the image using its 'display' function.  To show the superpixels on
+top of the image, simply pass the keyword argument: superpixels=True.
+'''
 import cv2
 from cv2 import cv
 import matplotlib.pyplot as plt
@@ -6,14 +20,23 @@ from skimage.segmentation import mark_boundaries
 from skimage.segmentation import slic
 
 class BadImageError(Exception):
+    '''Occurs when an image is not loaded correctly by OpenCV.'''
     pass
 
 class NotColorError(AttributeError):
+    '''Occurs when trying to perform color operations on a grayscale image.'''
     pass
 
 class Image(object):
+    '''Represents a single image.'''
+
     class Superpixel(object):
-        def __init__(self, image, indices):
+        '''Represents a single superpixel.'''
+        def __init__(self, image, indices, id):
+            '''Stores a reference to the containing image, as well as calculates the median
+            properties.
+            '''
+            self._id = id
             self._image = image
             self._indices = indices
             self._coordinates = np.nonzero(indices)
@@ -30,8 +53,13 @@ class Image(object):
 
             self._median_intensity = lumin
 
+        def __eq__(self, other):
+            return self._id == other._id and self._image is other._image
+
         @property
         def median_color(self):
+            '''The median color for this superpixel represented as a tuple of floats: (alpha, beta).
+            '''
             if self._image._color:
                 return self._median_color
             else:
@@ -39,9 +67,11 @@ class Image(object):
 
         @property
         def median_intensity(self):
+            '''The median intensity for this superpixel.'''
             return self._median_intensity
 
     def _configure_superpixels(self):
+        '''Configures the superpixels for this image.'''
         num_pixels = self._raw.shape[0] * self._raw.shape[1]
         if self._color:
             self._segments = slic(self._raw, convert2lab=True, n_segments=num_pixels / 50,
@@ -54,9 +84,10 @@ class Image(object):
         self._superpixels = []
         for i in xrange(np.max(self._segments)):
             indices = (self._segments == i)
-            self._superpixels.append(Image.Superpixel(self, indices))
+            self._superpixels.append(Image.Superpixel(self, indices, i))
 
     def __init__(self, path, color=False):
+        '''Loads the image at the given path.'''
         self._path = path
         self._color = color
         if self._color:
@@ -73,13 +104,20 @@ class Image(object):
         self._configure_superpixels()
 
     def __iter__(self):
+        '''You can iterate over the superpixels if you would like to.'''
         return iter(self._superpixels)
+
+    def __len__(self):
+        '''The "length" of the image is represented by the number of superpixels in it.'''
+        return len(self._superpixels)
 
     @property
     def raw(self):
+        '''The raw RGB/L matrix returned by OpenCV (DO NOT MODIFY, UNDEFINED BEHAVIOR).'''
         return self._raw
 
     def display(self, superpixels=False):
+        '''Display this image with or without superpixels in matplotlib.'''
         fig = plt.figure('Image: (%d, %d)' % (self._raw.shape[0], self._raw.shape[1]))
         ax = fig.add_subplot(1, 1, 1)
         if superpixels:
