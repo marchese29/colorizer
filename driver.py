@@ -57,6 +57,9 @@ def main():
         except BadImageError:
             return 'There was an error loading the image at %s' % path
 
+    # Calculate the grayscale bins from the target image.
+    hist, _ = np.histogram([sp.median_intensity for sp in grayscale], range=(0, 255), bins=51)
+
     return 0
 
 
@@ -64,8 +67,6 @@ if __name__ == '__main__':
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        print '\nReceived keyboard interrupt, aborting...'
-        sys.exit(1)
+        sys.exit('\nReceived keyboard interrupt, aborting...')
     except Exception as e:
-        print >>sys.stderr, 'Received an unexpected exception:'
         sys.exit(traceback.format_exc())

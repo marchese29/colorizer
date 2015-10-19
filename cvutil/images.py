@@ -27,6 +27,9 @@ class NotColorError(AttributeError):
     '''Occurs when trying to perform color operations on a grayscale image.'''
     pass
 
+def round5(value):
+    return int(value) - (int(value) % 5)
+
 class Image(object):
     '''Represents a single image.'''
 
@@ -86,6 +89,13 @@ class Image(object):
             indices = (self._segments == i)
             self._superpixels.append(Image.Superpixel(self, indices, i))
 
+    def _generate_grayscale_histogram(self):
+        self._histogram, _ = np.histogram([sp.median_intensity for sp in self], range=(0, 255),
+                                          bins=51, density=True)
+        self._distribution = {\
+            i: [sp for sp in self if round5(sp.median_intensity) == i] for i in range(0, 251, 5)\
+        }
+
     def __init__(self, path, color=False):
         '''Loads the image at the given path.'''
         self._path = path
@@ -101,7 +111,11 @@ class Image(object):
         if color:
             self._labimage = cv2.cvtColor(self._raw, cv.CV_RGB2Lab)
 
+        # Calculate superpixels
         self._configure_superpixels()
+
+        # Generate the grayscale histogram
+        self._generate_grayscale_histogram()
 
     def __iter__(self):
         '''You can iterate over the superpixels if you would like to.'''
@@ -115,6 +129,21 @@ class Image(object):
     def raw(self):
         '''The raw RGB/L matrix returned by OpenCV (DO NOT MODIFY, UNDEFINED BEHAVIOR).'''
         return self._raw
+
+    @property
+    def color(self):
+        '''Whether or not this is a color image.'''
+        return self._color
+
+    @property
+    def distribution(self):
+        '''The superpixels as they are in their bins.'''
+        return self._distribution
+
+    @property
+    def histogram(self):
+        '''The grayscale distribution of the superpixel median intensities.'''
+        return self._histogram
 
     def display(self, superpixels=False):
         '''Display this image with or without superpixels in matplotlib.'''
