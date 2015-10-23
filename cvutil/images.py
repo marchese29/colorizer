@@ -19,6 +19,8 @@ import numpy as np
 from skimage.segmentation import mark_boundaries
 from skimage.segmentation import slic
 
+from util import round5_down
+
 class BadImageError(Exception):
     '''Occurs when an image is not loaded correctly by OpenCV.'''
     pass
@@ -26,9 +28,6 @@ class BadImageError(Exception):
 class NotColorError(AttributeError):
     '''Occurs when trying to perform color operations on a grayscale image.'''
     pass
-
-def round5(value):
-    return int(value) - (int(value) % 5)
 
 class Image(object):
     '''Represents a single image.'''
@@ -90,10 +89,11 @@ class Image(object):
             self._superpixels.append(Image.Superpixel(self, indices, i))
 
     def _generate_grayscale_histogram(self):
+        '''Configures the histogram for this image.'''
         self._histogram, _ = np.histogram([sp.median_intensity for sp in self], range=(0, 255),
                                           bins=51, density=True)
         self._distribution = {\
-            i: [sp for sp in self if round5(sp.median_intensity) == i] for i in range(0, 251, 5)\
+            i: [sp for sp in self if round5_down(sp.median_intensity) == i] for i in range(0, 255, 5)\
         }
 
     def __init__(self, path, color=False):
@@ -136,14 +136,53 @@ class Image(object):
         return self._color
 
     @property
-    def distribution(self):
+    def grayscale_distribution(self):
         '''The superpixels as they are in their bins.'''
         return self._distribution
 
     @property
     def histogram(self):
         '''The grayscale distribution of the superpixel median intensities.'''
-        return self._histogram
+        return self._histogram * (1.0 / np.sum(self._histogram))
+
+    def get_normalized_distribution(self, image):
+        '''Retrieves the grayscale distribution normalized to the provided image.'''
+        if hasattr(self, '_normalized'):
+            return self._normalized
+        
+        # Sort out the superpixels in descending order of intensity
+        sorted_pixels = sorted(self, key=lambda x: x.median_intensity, reverse=True)
+        self._normalized = { i: [] for i in range(0, 254, 5) }
+
+        for idx in range(0, 255, 5):
+            density = image.histogram[idx/5]
+            for j in range(int(density * len(self))):
+                self._normalized[idx].append(sorted_pixels.pop())
+
+        # Stick any leftovers in the last bin.
+        while len(sorted_pixels) > 0:
+            self._normalized[250].append(sorted_pixels.pop())
+
+        return self._normalized
+
+    def graph_distribution(self, normalized=False):
+        '''Plots the grayscale distribution for this image.  If normalized is true, the most recent
+        normalization of the histogram is displayed.
+        '''
+        if normalized:
+            assert hasattr(self, '_normalized')
+            fig = plt.figure('Normalized histogram')
+            ax = fig.add_subplot(1, 1, 1)
+            dist = []
+            for key, value in self._normalized.iteritems():
+                dist += ([key] * len(value))
+            ax.hist(dist, range=(0, 255), bins=51)
+        else:
+            fig = plt.figure('Non-normalized histogram')
+            ax = fig.add_subplot(1, 1, 1)
+            ax.hist([sp.median_intensity for sp in self], range=(0, 255), bins=51)
+        plt.axis('on')
+        plt.show()
 
     def display(self, superpixels=False):
         '''Display this image with or without superpixels in matplotlib.'''
@@ -154,5 +193,4 @@ class Image(object):
         else:
             ax.imshow(self._raw, cmap=plt.cm.gray, vmin=0, vmax=255)
         plt.axis('off')
-        plt.ion()
         plt.show()

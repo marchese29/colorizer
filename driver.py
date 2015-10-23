@@ -14,7 +14,7 @@ def validate_args(args):
     # Validate that the grayscale image is a valid file.
     args.grayscale = os.path.abspath(os.path.expanduser(args.grayscale))
     if not os.path.isfile(args.grayscale):
-        raise IOError('File Not Found.')
+        raise IOError('File not found: %s' % args.grayscale)
 
     # Validate that the color images are valid files.
     context_images = []
@@ -44,21 +44,22 @@ def main():
     except IOError as err:
         return str(err)
 
-    # Load the images
+    # Load the grayscale image.
     try:
         grayscale = Image(args.grayscale, color=False)
     except BadImageError:
         return 'There was an error reading the grayscale image.'
     
+    # Load the context images.
     context = []
-    for idx, path in enumerate(args.context):
+    for path in args.context:
         try:
             context.append(Image(path, color=True))
         except BadImageError:
             return 'There was an error loading the image at %s' % path
 
-    # Calculate the grayscale bins from the target image.
-    hist, _ = np.histogram([sp.median_intensity for sp in grayscale], range=(0, 255), bins=51)
+    # Normalize the grayscale histograms of the context images to the target image's histogram.
+    pass
 
     return 0
 
