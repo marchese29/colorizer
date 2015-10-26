@@ -3,10 +3,7 @@ import os
 import sys
 import traceback
 
-import cv2
-from cv2 import cv
-import numpy as np
-
+from cvutil.distributions import LabColorDistribution
 from cvutil.images import Image, BadImageError
 
 
@@ -58,8 +55,7 @@ def main():
         except BadImageError:
             return 'There was an error loading the image at %s' % path
 
-    # Normalize the grayscale histograms of the context images to the target image's histogram.
-    pass
+    # Generate the Lab Color Distribution
 
     return 0
 
