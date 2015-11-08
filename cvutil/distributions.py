@@ -25,6 +25,15 @@ class LabColorDistribution(object):
         def __len__(self):
             return len(self._superpixels)
 
+        @property
+        def index(self):
+            if not hasattr(self, '_idx'):
+                raise AttributeError('No index has been set on this color bin yet.')
+            return self._idx
+
+        def set_index(self, idx):
+            self._idx = idx
+
         def split(self):
             '''Splits the color bin along the opposite axis from the previous split.'''
             split_pixel = self._superpixels[len(self._superpixels) / 2]
@@ -110,13 +119,14 @@ class LabColorDistribution(object):
         self._lines = []
         self._configure_bins(init_bin, num_bins)
 
+    def __iter__(self):
+        return iter(self._bins)
+
     def lookup(self, superpixel):
         '''Looks up the given superpixel in this distribution and returns the corresponding
         (alpha, beta) tuple.
         '''
-        if not hasattr(self, '_lookup_cache'):
-            self._lookup_cache
-        return superpixel._color_bin.average_color
+        return superpixel._color_bin
 
     def display(self, bins=False):
         '''Display all of the points in this distribution, also shows the bin boundaries if bins is

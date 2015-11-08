@@ -92,8 +92,8 @@ class Image(object):
         '''Configures the histogram for this image.'''
         self._histogram, _ = np.histogram([sp.median_intensity for sp in self], range=(0, 255),
                                           bins=51, density=True)
-        self._distribution = {\
-            i: [sp for sp in self if round5_down(sp.median_intensity) == i] for i in range(0, 255, 5)\
+        self._distribution = { \
+            i: [p for p in self if round5_down(p.median_intensity) == i] for i in range(0, 255, 5) \
         }
 
     def __init__(self, path, color=False):
@@ -145,11 +145,8 @@ class Image(object):
         '''The grayscale distribution of the superpixel median intensities.'''
         return self._histogram * (1.0 / np.sum(self._histogram))
 
-    def get_normalized_distribution(self, image):
-        '''Retrieves the grayscale distribution normalized to the provided image.'''
-        if hasattr(self, '_normalized'):
-            return self._normalized
-        
+    def configure_normalized_distribution(self, image):
+        '''Normalizes this images grayscale histogram.'''
         # Sort out the superpixels in descending order of intensity
         sorted_pixels = sorted(self, key=lambda x: x.median_intensity, reverse=True)
         self._normalized = { i: [] for i in range(0, 254, 5) }
@@ -163,7 +160,19 @@ class Image(object):
         while len(sorted_pixels) > 0:
             self._normalized[250].append(sorted_pixels.pop())
 
-        return self._normalized
+    def lookup(self, intensity):
+        '''Performs a lookup of the given intensity value on this image's non-normalized grayscale
+        distribution and returns all of the superpixels in the corresponding bin.
+        '''
+        return self._distribution[round5_down(intensity)]
+
+    def lookup_normalized(self, intensity):
+        '''Performs a lookup of the given intensity value on this image's normalized grayscale
+        distribution and returns all of the superpixels in the corresponding bin.
+        '''
+        if not hasattr(self, '_normalized'):
+            raise AttributeError('No normalized histogram has been produced for this image yet.')
+        return self._normalized[round5_down(intensity)]
 
     def graph_distribution(self, normalized=False):
         '''Plots the grayscale distribution for this image.  If normalized is true, the most recent
