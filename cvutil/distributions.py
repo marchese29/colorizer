@@ -13,7 +13,7 @@ class LabColorDistribution(object):
 
         bounds: [(a_min, a_max), (b_min, b_max)]
         '''
-        def __init__(self, superpixels, originating_split, dist, bounds=[(0, 250), (0, 250)]):
+        def __init__(self, superpixels, originating_split, dist, bounds=[(0, 255), (0, 255)]):
             '''Generates a color bin from the given superpixel.'''
             for sp in superpixels:
                 sp._color_bin = self
@@ -140,3 +140,27 @@ class LabColorDistribution(object):
             lines = mc.LineCollection(self._lines, linewidths=2, colors=[(1, 0, 0, 1)])
             ax.add_collection(lines)
         plt.show()
+
+    @property
+    def bins(self):
+        '''The list of color bins.'''
+        return self._bins
+
+    @property
+    def max_distance(self):
+        '''Returns the maximum euclidean distance between any two color bins.'''
+        if hasattr(self, '_max_distance'):
+            return self._max_distance
+
+        self._max_distance = 0.0
+        for i in range(len(self._bins)-1):
+            for j in range(i+1, len(self._bins)):
+                distance = LabColorDistribution.bin_distance(self._bins[i], self._bins[j])
+                if distance > self._max_distance:
+                    self._max_distance = distacne
+        return self._max_distance
+
+    @staticmethod
+    def bin_distance(bin1, bin2):
+        '''Determines the Lab color distance between the average values of the given bin.'''
+        return sum(map(lambda x, y: (x - y)**2.0, bin1.average_color, bin2.average_color))**0.5

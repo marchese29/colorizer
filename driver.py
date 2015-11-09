@@ -3,10 +3,14 @@ import os
 import sys
 import traceback
 
+import cv2
+from cv2 import cv
+import matplotlib.pyplot as plt
 import numpy as np
 
 from cvutil.distributions import LabColorDistribution
 from cvutil.images import Image, BadImageError
+from cvutil.markov import MarkovGraph
 
 
 def validate_args(args):
@@ -36,6 +40,8 @@ def configure_args():
 
     parser.add_argument('--num-bins', type=int, default=75,
         help='Number of color bins to use (default 75).')
+    parser.add_argument('--smoothness', type=float, default=1.0,
+        help'Weight on the smoothness term of the energy function (default 1.0).')
 
     return validate_args(parser.parse_args())
 
@@ -75,12 +81,30 @@ def main():
 
     # Generate the color probability histogram for each superpixel in the target.
     print 'Generating color probability distributions.'
-    for t_sp in grayscale:
-        t_sp.color_histogram = np.zeros(args.num_bins, dtype=float)
-        for ref in context:
-            for r_sp in ref.lookup_normalized(t_sp.median_intensity):
-                t_sp.color_histogram[color_distribution.lookup(r_sp).index] += 1.0
-        t_sp.color_histogram /= np.sum(t_sp.color_histogram)
+    histogram = np.zeros((grayscale.shape[0], grayscale.shape[1], args.num_bins), dtype=float)
+    for i in grayscale.shape[0]:
+        for j in grayscale.shape[1]:
+            for ref in context:
+                for r_sp in ref.lookup_normalized(grayscale.raw[i,j]):
+                    histogram[i,j,color_distribution.lookup(r_sp).index] += 1
+            histogram[i,j,:] /= np.sum(histogram[i,j,:])
+
+    # This is where the real magic happens.
+    print 'Building and Solving the Markov Random Field'
+    field = MarkovGraph(grayscale, color_distribution, histogram, smoothness=args.smoothness)
+    labelled = field.solve()
+
+    # Build the color image from the given labelling.
+    print 'Generating the Color Image'
+    result = np.zeros((grayscale.shape[0], grayscale.shape[1], 3), dtype=np.uint8)
+    np.copyto(result[...,0], grayscale.raw)
+    for i in range(labelled.shape[0]):
+        for j in range(labelled.shape[1]):
+            color = np.array(color_distribution.bins[labelled[i,j]].average_color).astype(np.uint8)
+            np.copyto(result[i,j,1:], color)
+
+    # Produce the final color RGB image.
+    final_image = cv2.cvtColor(result, cv.CV_Lab2RGB)
 
     return 0
 

@@ -46,12 +46,12 @@ class Image(object):
 
             # Calculate the average color for this pixel
             if image._color:
-                lumin = np.median(self._image._labimage[:,:,0][indices].astype(np.int64))
-                alpha = np.median(self._image._labimage[:,:,1][indices].astype(np.int64))
-                beta  = np.median(self._image._labimage[:,:,2][indices].astype(np.int64))
+                lumin = np.median(self._image._labimage[...,0][indices].astype(float))
+                alpha = np.median(self._image._labimage[...,1][indices].astype(float))
+                beta  = np.median(self._image._labimage[...,2][indices].astype(float))
                 self._median_color = (alpha, beta)
             else:
-                lumin = np.median(self._image._raw[indices].astype(np.int64))
+                lumin = np.median(self._image._raw[indices].astype(float))
 
             self._median_intensity = lumin
 
@@ -71,6 +71,11 @@ class Image(object):
         def median_intensity(self):
             '''The median intensity for this superpixel.'''
             return self._median_intensity
+
+        @property
+        def indices(self):
+            '''The indices corresponding to this superpixel's sub-pixels.'''
+            return self._indices
 
     def _configure_superpixels(self):
         '''Configures the superpixels for this image.'''
@@ -129,6 +134,11 @@ class Image(object):
     def raw(self):
         '''The raw RGB/L matrix returned by OpenCV (DO NOT MODIFY, UNDEFINED BEHAVIOR).'''
         return self._raw
+
+    @property
+    def shape(self):
+        '''The shape as returned for the raw numpy representation.'''
+        return self._raw.shape
 
     @property
     def color(self):
