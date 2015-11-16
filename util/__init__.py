@@ -1,6 +1,8 @@
 '''Contains various useful utility functions.'''
 
 def round5_down(value):
+    if value == 255:
+        return round5_down(254)
     return int(value) - (int(value) % 5)
 
 def max_index(lst, key=None):

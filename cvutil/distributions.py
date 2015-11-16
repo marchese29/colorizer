@@ -84,8 +84,9 @@ class LabColorDistribution(object):
                 return (t1, t2)
 
             # Calculate the representative totals
-            totals = reduce(lambda tot, sp: accum(tot, sp), self._superpixels, initializer=(0, 0))
+            totals = reduce(lambda tot, sp: accum(tot, sp), self._superpixels, (0, 0))
             self._rep_color = (totals[0] / len(self._superpixels), totals[1] / len(self._superpixels))
+            return self._rep_color
 
     def _configure_bins(self, first_bin, num_bins):
         '''Configures the color bins to have the desired number of bins using the provided initial
@@ -157,7 +158,7 @@ class LabColorDistribution(object):
             for j in range(i+1, len(self._bins)):
                 distance = LabColorDistribution.bin_distance(self._bins[i], self._bins[j])
                 if distance > self._max_distance:
-                    self._max_distance = distacne
+                    self._max_distance = distance
         return self._max_distance
 
     @staticmethod

@@ -41,7 +41,7 @@ def configure_args():
     parser.add_argument('--num-bins', type=int, default=75,
         help='Number of color bins to use (default 75).')
     parser.add_argument('--smoothness', type=float, default=1.0,
-        help'Weight on the smoothness term of the energy function (default 1.0).')
+        help='Weight on the smoothness term of the energy function (default 1.0).')
 
     return validate_args(parser.parse_args())
 
@@ -82,8 +82,8 @@ def main():
     # Generate the color probability histogram for each superpixel in the target.
     print 'Generating color probability distributions.'
     histogram = np.zeros((grayscale.shape[0], grayscale.shape[1], args.num_bins), dtype=float)
-    for i in grayscale.shape[0]:
-        for j in grayscale.shape[1]:
+    for i in range(grayscale.shape[0]):
+        for j in range(grayscale.shape[1]):
             for ref in context:
                 for r_sp in ref.lookup_normalized(grayscale.raw[i,j]):
                     histogram[i,j,color_distribution.lookup(r_sp).index] += 1
@@ -105,6 +105,13 @@ def main():
 
     # Produce the final color RGB image.
     final_image = cv2.cvtColor(result, cv.CV_Lab2RGB)
+
+    # Display the resulting image.
+    fig = plt.figure('Colorized Image')
+    ax = fig.add_subplot(1, 1, 1)
+    ax.imshow(final_image)
+    plt.axis('off')
+    plt.show()
 
     return 0
 

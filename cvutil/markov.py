@@ -2,6 +2,8 @@
 import numpy as np
 from maxflow import fastmin
 
+from cvutil.distributions import LabColorDistribution
+
 class MarkovGraph(object):
     '''Represents the graph generated for solving the Markov Random Field.'''
     def _configure_smoothness_term(self):
@@ -9,6 +11,7 @@ class MarkovGraph(object):
         labels at neighboring pixels.
         '''
         self._V = np.zeros((self._D.shape[-1],)*2, dtype=float)
+        self._distribution.max_distance
         for i in range(self._V.shape[0]):
             bin1 = self._distribution.bins[i]
             for j in range(self._V.shape[1]):
@@ -37,5 +40,5 @@ class MarkovGraph(object):
         '''
         if hasattr(self, '_solution'):
             return self._solution
-        self._solution = fastmin.aexpansion(self._D, self._V)
+        self._solution = fastmin.aexpansion_grid(self._D, self._V)
         return self._solution
