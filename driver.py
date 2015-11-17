@@ -87,7 +87,9 @@ def main():
             for ref in context:
                 for r_sp in ref.lookup_normalized(grayscale.raw[i,j]):
                     histogram[i,j,color_distribution.lookup(r_sp).index] += 1
-            histogram[i,j,:] /= np.sum(histogram[i,j,:])
+            # Only normalize if this isn't a bunch of zeros.
+            if np.sum(histogram[i,j,:]) >= 1:
+                histogram[i,j,:] /= np.sum(histogram[i,j,:])
 
     # This is where the real magic happens.
     print 'Building and Solving the Markov Random Field'
