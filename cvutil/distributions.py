@@ -140,6 +140,7 @@ class LabColorDistribution(object):
         if bins:
             lines = mc.LineCollection(self._lines, linewidths=2, colors=[(1, 0, 0, 1)])
             ax.add_collection(lines)
+        plt.savefig('data/dist%d.png' % self._num_bins, format='png')
         plt.show()
 
     @property

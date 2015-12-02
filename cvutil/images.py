@@ -77,6 +77,50 @@ class Image(object):
             '''The indices corresponding to this superpixel's sub-pixels.'''
             return self._indices
 
+    class Window(object):
+        '''Represents a single 5x5 neighborhood in the image.'''
+        def __init__(self, index, image):
+            '''Instantiate a window at the given index of the given image.'''
+            self._image = image
+            self._index = index
+            self._i = self._index[0]
+            self._j = self._index[1]
+            if self._image._color:
+                self._window = self._image._labimage[self._i-2:self._i+3, self._j-2:self._j+3, :]
+            else:
+                self._window = self._image._raw[self._i-2:self._i+3, self._j-2:self._j+3]
+
+            if image._color:
+                lumin = np.median(self._window[...,0].astype(float))
+                alpha = np.median(self._window[...,1].astype(float))
+                beta = np.median(self._window[...,2].astype(float))
+                self._median_color = (alpha, beta)
+                self._variance = np.var(self._window[...,0].astype(float))
+            else:
+                lumin = np.median(self._window.astype(float))
+                self._variance = np.var(self._window.astype(float))
+            self._median_intensity = lumin
+
+        @property
+        def median_color(self):
+            return self._median_color
+
+        @property
+        def median_intensity(self):
+            return self._median_intensity
+
+        @property
+        def variance(self):
+            return self._variance
+
+        @property
+        def window(self):
+            return self._window
+
+        @property
+        def index(self):
+            return (self._i - 2, self._j - 2)
+
     def _configure_superpixels(self):
         '''Configures the superpixels for this image.'''
         num_pixels = self._raw.shape[0] * self._raw.shape[1]
@@ -101,10 +145,39 @@ class Image(object):
             i: [p for p in self if round5_down(p.median_intensity) == i] for i in range(0, 255, 5) \
         }
 
-    def __init__(self, path, color=False):
+    def _configure_neighborhoods(self):
+        '''Configures the neighborhoods and their statistics for this image.'''
+        # We need all of the neighborhoods for a grayscale image.
+        self._windows = []
+        step = 5 if self._color else 1
+        for i in range(2, self._raw.shape[0] - 2, step):
+            for j in range(2, self._raw.shape[0] - 2, step):
+                self._windows.append(Image.Window((i, j), self))
+
+    def _generate_variance_histogram(self):
+        '''Configures the variance histogram for this image.'''
+        sorted_windows = sorted(self._windows, key=lambda x: x.variance)
+        self._variance_edges = np.zeros((50,), dtype=float)
+        self._variance_histogram = dict()
+        bin_size = len(sorted_windows) / 50
+
+        for i in range(50):
+            self._variance_histogram[i] = sorted_windows[:bin_size]
+            sorted_windows = sorted_windows[bin_size:]
+            self._variance_edges[i] = self._variance_histogram[i][-1].variance
+        if len(sorted_windows) > 0:
+            while len(sorted_windows) > 0:
+                self._variance_histogram[i].append(sorted_windows.pop(0))
+            self._variance_edges[-1] = self._variance_histogram[i][-1].variance
+
+        for key, value in self._variance_histogram.iteritems():
+            print '%d: %d' % (key, len(value))
+
+    def __init__(self, path, color=False, stat='luminance'):
         '''Loads the image at the given path.'''
         self._path = path
         self._color = color
+        self._stat = stat
         if self._color:
             self._raw = cv2.cvtColor(cv2.imread(path, cv.CV_LOAD_IMAGE_COLOR), cv.CV_BGR2RGB)
         else:
@@ -116,15 +189,28 @@ class Image(object):
         if color:
             self._labimage = cv2.cvtColor(self._raw, cv.CV_RGB2Lab)
 
-        # Calculate superpixels
-        self._configure_superpixels()
+        if stat == 'luminance':
+            # Calculate superpixels
+            self._configure_superpixels()
 
-        # Generate the grayscale histogram
-        self._generate_grayscale_histogram()
+            # Generate the grayscale histogram
+            self._generate_grayscale_histogram()
+        elif stat == 'variance':
+            # Calculate the pixel neighborhoods.
+            self._configure_neighborhoods()
+
+            # Generate the variance histogram.
+            if self._color:
+                self._generate_variance_histogram()
+        else:
+            raise ValueError('Do not recognize the statistic: %s' % stat)
 
     def __iter__(self):
-        '''You can iterate over the superpixels if you would like to.'''
-        return iter(self._superpixels)
+        '''You can iterate over the pixel groupings if you would like to.'''
+        if self._stat == 'luminance':
+            return iter(self._superpixels)
+        elif self._stat == 'variance':
+            return iter(self._windows)
 
     def __len__(self):
         '''The "length" of the image is represented by the number of superpixels in it.'''
@@ -184,7 +270,14 @@ class Image(object):
             raise AttributeError('No normalized histogram has been produced for this image yet.')
         return self._normalized[round5_down(intensity)]
 
-    def graph_distribution(self, normalized=False):
+    def lookup_variance(self, variance):
+        '''Looks up all of the pixel windows that exist in the same variance bin as the provided
+        variance value.
+        '''
+        indices = (self._variance_edges >= variance).nonzero()
+        return self._variance_histogram[indices[0][0]] if len(indices[0]) > 0 else self._variance_histogram[49]
+
+    def graph_grayscale_distribution(self, normalized=False):
         '''Plots the grayscale distribution for this image.  If normalized is true, the most recent
         normalization of the histogram is displayed.
         '''

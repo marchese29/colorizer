@@ -20,6 +20,27 @@ class MarkovGraph(object):
                 self._V[i,j] = dist
                 self._V[j,i] = dist
 
+    def _configure_variation_likelihoods(self):
+        '''This configures the matrix representing the likelihood of a color variation along each
+        axis.
+        '''
+        self._U = np.zeros((self._D.shape[0], self._D.shape[1], 2), dtype=float)
+
+        # Get the raw target image as a floating point array.
+        raw = self._target.astype(float)
+
+        # Find the absolute difference between the neighbors along each dimension
+        self._U[:,:-1,1] = np.absolute(raw[:,:-1] - raw[:,1:])
+        self._U[:-1,:,0] = np.absolute(raw[:-1,:] - raw[1:,:])
+
+        # Normalize everything.
+        self._U /= self._U.max()
+        self._U = 1.0 - self._U
+
+        # Invalid neighbors are set to infinity
+        self._U[:,-1,0] = np.inf
+        self._U[-1,:,1] = np.inf
+
     def __init__(self, target_image, lab_distribution, probability_distribution, smoothness=1.0):
         '''Configure the markov random field using the given target and reference images, using the
         provided number of labels for the coloring.
@@ -33,6 +54,9 @@ class MarkovGraph(object):
         self._smoothness = smoothness
         self._configure_smoothness_term()
         self._V *= smoothness
+
+        # Configure the variation likelihoods.
+        #self._configure_variation_likelihoods()
 
     def solve(self):
         '''Solves the MRF using the Fast Approximate Energy Minimization technique.  Returns the

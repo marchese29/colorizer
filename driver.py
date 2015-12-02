@@ -42,6 +42,10 @@ def configure_args():
         help='Number of color bins to use (default 75).')
     parser.add_argument('--smoothness', type=float, default=1.0,
         help='Weight on the smoothness term of the energy function (default 1.0).')
+    parser.add_argument('--feature', choices={'luminance', 'variance'}, default='luminance',
+        help='Which feature of the image to use in colorization.')
+    parser.add_argument('--save-image', action='store_true',
+        help='Saves the resulting image as result.jpg in the current directory.')
 
     return validate_args(parser.parse_args())
 
@@ -55,7 +59,7 @@ def main():
     # Load the grayscale image.
     print 'Loading the grayscale target image and calculating superpixels.'
     try:
-        grayscale = Image(args.grayscale, color=False)
+        grayscale = Image(args.grayscale, color=False, stat=args.feature)
     except BadImageError:
         return 'There was an error reading the grayscale image.'
     
@@ -64,14 +68,15 @@ def main():
     context = []
     for path in args.context:
         try:
-            context.append(Image(path, color=True))
+            context.append(Image(path, color=True, stat=args.feature))
         except BadImageError:
             return 'There was an error loading the image at %s' % path
 
-    # Normalize the grayscale distributiongs
-    print 'Normalizing the reference image grayscale distributions'
-    for ref in context:
-        ref.configure_normalized_distribution(grayscale)
+    # Normalize the grayscale distributions if we need to.
+    if args.feature == 'luminance':
+        print 'Normalizing the reference image grayscale distributions'
+        for ref in context:
+            ref.configure_normalized_distribution(grayscale)
 
     # Generate the Lab Color Distribution
     print 'Generating the color distribution.'
@@ -81,29 +86,54 @@ def main():
 
     # Generate the color probability histogram for each superpixel in the target.
     print 'Generating color probability distributions.'
-    histogram = np.zeros((grayscale.shape[0], grayscale.shape[1], args.num_bins), dtype=float)
-    for i in range(grayscale.shape[0]):
-        for j in range(grayscale.shape[1]):
+    if args.feature == 'luminance':
+        # Our probability distribution is defined by the number of superpixels from the
+        # corresponding grayscale bin in each reference image.
+        histogram = np.zeros((grayscale.shape[0], grayscale.shape[1], args.num_bins), dtype=float)
+        for i in xrange(grayscale.shape[0]):
+            for j in xrange(grayscale.shape[1]):
+                for ref in context:
+                    for r_sp in ref.lookup_normalized(grayscale.raw[i,j]):
+                        histogram[i,j,color_distribution.lookup(r_sp).index] += 1
+                s = histogram[i,j,:].sum()
+                if s > 1.0:
+                    histogram[i,j,:] /= s
+    elif args.feature == 'variance':
+        # Our probability distribution is defined by the number of windows from the corresponding
+        # variance bin in each reference image.
+        histogram = np.zeros((grayscale.shape[0]-4, grayscale.shape[1]-4, args.num_bins), dtype=float)
+        for window in grayscale:
+            (i, j) = window.index
             for ref in context:
-                for r_sp in ref.lookup_normalized(grayscale.raw[i,j]):
-                    histogram[i,j,color_distribution.lookup(r_sp).index] += 1
-            # Only normalize if this isn't a bunch of zeros.
-            if np.sum(histogram[i,j,:]) >= 1:
-                histogram[i,j,:] /= np.sum(histogram[i,j,:])
+                winds = ref.lookup_variance(window.variance)
+                for r_wind in winds:
+                    histogram[i,j,color_distribution.lookup(r_wind).index] += 1
+            s = histogram[i,j,:].sum()
+            if s > 1.0:
+                histogram[i,j,:] /= s
 
     # This is where the real magic happens.
     print 'Building and Solving the Markov Random Field'
-    field = MarkovGraph(grayscale, color_distribution, histogram, smoothness=args.smoothness)
+    field = MarkovGraph(grayscale.raw[2:-2,2:-2], color_distribution, histogram,
+        smoothness=args.smoothness)
     labelled = field.solve()
+    print '%d unique labels' % len(np.unique(labelled))
 
     # Build the color image from the given labelling.
     print 'Generating the Color Image'
-    result = np.zeros((grayscale.shape[0], grayscale.shape[1], 3), dtype=np.uint8)
-    np.copyto(result[...,0], grayscale.raw)
+    # We need to clip the image when using certain features.
+    if args.feature == 'luminance':
+        result = np.zeros((grayscale.shape[0], grayscale.shape[1], 3), dtype=np.uint8)
+        np.copyto(result[...,0], grayscale.raw)
+    elif args.feature == 'variance':
+        result = np.zeros((grayscale.shape[0]-4, grayscale.shape[1]-4, 3), dtype=np.uint8)
+        np.copyto(result[...,0], grayscale.raw[2:-2, 2:-2])
+
+    # Recover the color from each label
     for i in range(labelled.shape[0]):
         for j in range(labelled.shape[1]):
             color = np.array(color_distribution.bins[labelled[i,j]].average_color).astype(np.uint8)
-            np.copyto(result[i,j,1:], color)
+            result[i,j,1:] = color
 
     # Produce the final color RGB image.
     final_image = cv2.cvtColor(result, cv.CV_Lab2RGB)
@@ -114,6 +144,9 @@ def main():
     ax.imshow(final_image)
     plt.axis('off')
     plt.show()
+
+    if args.save_image:
+        cv2.imwrite('result.jpg', final_image)
 
     return 0
 
