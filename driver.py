@@ -7,6 +7,7 @@ import cv2
 from cv2 import cv
 import matplotlib.pyplot as plt
 import numpy as np
+from progressbar import Bar, ETA, Percentage, ProgressBar
 
 from cvutil.distributions import LabColorDistribution
 from cvutil.images import Image, BadImageError
@@ -42,8 +43,8 @@ def configure_args():
         help='Number of color bins to use (default 75).')
     parser.add_argument('--smoothness', type=float, default=1.0,
         help='Weight on the smoothness term of the energy function (default 1.0).')
-    parser.add_argument('--feature', choices={'luminance', 'variance'}, default='luminance',
-        help='Which feature of the image to use in colorization.')
+    parser.add_argument('--feature', choices={'luminance', 'variance-freq', 'variance-width'},
+        default='luminance', help='Which feature of the image to use in colorization.')
     parser.add_argument('--save-image', action='store_true',
         help='Saves the resulting image as result.jpg in the current directory.')
 
@@ -57,14 +58,14 @@ def main():
         return str(err)
 
     # Load the grayscale image.
-    print 'Loading the grayscale target image and calculating superpixels.'
+    print 'Loading the grayscale target image and calculating neighborhoods.'
     try:
         grayscale = Image(args.grayscale, color=False, stat=args.feature)
     except BadImageError:
         return 'There was an error reading the grayscale image.'
     
     # Load the context images.
-    print 'Loading the color reference images and calculating superpixels.'
+    print 'Loading the color reference images and calculating neighborhoods.'
     context = []
     for path in args.context:
         try:
@@ -98,10 +99,13 @@ def main():
                 s = histogram[i,j,:].sum()
                 if s > 1.0:
                     histogram[i,j,:] /= s
-    elif args.feature == 'variance':
+    elif args.feature == 'variance-freq' or args.feature == 'variance-width':
         # Our probability distribution is defined by the number of windows from the corresponding
         # variance bin in each reference image.
+        widgets = ['Generating: ', Percentage(), Bar(), ' ', ETA()]
+        pbar = ProgressBar(widgets=widgets, maxval=len(grayscale)).start()
         histogram = np.zeros((grayscale.shape[0]-4, grayscale.shape[1]-4, args.num_bins), dtype=float)
+        pidx = 0
         for window in grayscale:
             (i, j) = window.index
             for ref in context:
@@ -111,13 +115,15 @@ def main():
             s = histogram[i,j,:].sum()
             if s > 1.0:
                 histogram[i,j,:] /= s
+            pbar.update(pidx)
+            pidx += 1
+        pbar.finish()
 
     # This is where the real magic happens.
     print 'Building and Solving the Markov Random Field'
     field = MarkovGraph(grayscale.raw[2:-2,2:-2], color_distribution, histogram,
         smoothness=args.smoothness)
     labelled = field.solve()
-    print '%d unique labels' % len(np.unique(labelled))
 
     # Build the color image from the given labelling.
     print 'Generating the Color Image'
@@ -125,7 +131,7 @@ def main():
     if args.feature == 'luminance':
         result = np.zeros((grayscale.shape[0], grayscale.shape[1], 3), dtype=np.uint8)
         np.copyto(result[...,0], grayscale.raw)
-    elif args.feature == 'variance':
+    elif args.feature == 'variance-freq' or args.feature == 'variance-width':
         result = np.zeros((grayscale.shape[0]-4, grayscale.shape[1]-4, 3), dtype=np.uint8)
         np.copyto(result[...,0], grayscale.raw[2:-2, 2:-2])
 

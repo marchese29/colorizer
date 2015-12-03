@@ -56,7 +56,7 @@ class MarkovGraph(object):
         self._V *= smoothness
 
         # Configure the variation likelihoods.
-        #self._configure_variation_likelihoods()
+        # self._configure_variation_likelihoods()
 
     def solve(self):
         '''Solves the MRF using the Fast Approximate Energy Minimization technique.  Returns the

@@ -151,27 +151,33 @@ class Image(object):
         self._windows = []
         step = 5 if self._color else 1
         for i in range(2, self._raw.shape[0] - 2, step):
-            for j in range(2, self._raw.shape[0] - 2, step):
+            for j in range(2, self._raw.shape[1] - 2, step):
                 self._windows.append(Image.Window((i, j), self))
 
     def _generate_variance_histogram(self):
         '''Configures the variance histogram for this image.'''
         sorted_windows = sorted(self._windows, key=lambda x: x.variance)
-        self._variance_edges = np.zeros((50,), dtype=float)
         self._variance_histogram = dict()
-        bin_size = len(sorted_windows) / 50
+        if self._stat == 'variance-freq':
+            self._variance_edges = np.zeros((50,), dtype=float)
+            bin_size = len(sorted_windows) / 50
 
-        for i in range(50):
-            self._variance_histogram[i] = sorted_windows[:bin_size]
-            sorted_windows = sorted_windows[bin_size:]
-            self._variance_edges[i] = self._variance_histogram[i][-1].variance
-        if len(sorted_windows) > 0:
-            while len(sorted_windows) > 0:
-                self._variance_histogram[i].append(sorted_windows.pop(0))
-            self._variance_edges[-1] = self._variance_histogram[i][-1].variance
+            for i in range(50):
+                self._variance_histogram[i] = sorted_windows[:bin_size]
+                sorted_windows = sorted_windows[bin_size:]
+                self._variance_edges[i] = self._variance_histogram[i][-1].variance
+            if len(sorted_windows) > 0:
+                while len(sorted_windows) > 0:
+                    self._variance_histogram[i].append(sorted_windows.pop(0))
+                self._variance_edges[-1] = self._variance_histogram[i][-1].variance
+        else:
+            histo, self._variance_edges = np.histogram([w.variance for w in sorted_windows], bins=50)
+            self._variance_edges = self._variance_edges[1:]
 
-        for key, value in self._variance_histogram.iteritems():
-            print '%d: %d' % (key, len(value))
+            for i in xrange(50):
+                self._variance_histogram[i] = []
+                for j in xrange(histo[i]):
+                    self._variance_histogram[i].append(sorted_windows.pop(0))
 
     def __init__(self, path, color=False, stat='luminance'):
         '''Loads the image at the given path.'''
@@ -195,7 +201,7 @@ class Image(object):
 
             # Generate the grayscale histogram
             self._generate_grayscale_histogram()
-        elif stat == 'variance':
+        elif stat == 'variance-freq' or stat == 'variance-width':
             # Calculate the pixel neighborhoods.
             self._configure_neighborhoods()
 
@@ -209,12 +215,15 @@ class Image(object):
         '''You can iterate over the pixel groupings if you would like to.'''
         if self._stat == 'luminance':
             return iter(self._superpixels)
-        elif self._stat == 'variance':
+        elif self._stat == 'variance-freq' or self._stat == 'variance-width':
             return iter(self._windows)
 
     def __len__(self):
         '''The "length" of the image is represented by the number of superpixels in it.'''
-        return len(self._superpixels)
+        if self._stat == 'luminance':
+            return len(self._superpixels)
+        elif self._stat == 'variance-freq' or self._stat == 'variance-width':
+            return len(self._windows)
 
     @property
     def raw(self):
