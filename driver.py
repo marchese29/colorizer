@@ -90,7 +90,10 @@ def main():
     if args.feature == 'luminance':
         # Our probability distribution is defined by the number of superpixels from the
         # corresponding grayscale bin in each reference image.
+        widgets = ['Generating: ', Percentage(), Bar(), ' ', ETA()]
+        pbar = ProgressBar(widgets=widgets, maxval=np.size(grayscale.raw)).start()
         histogram = np.zeros((grayscale.shape[0], grayscale.shape[1], args.num_bins), dtype=float)
+        pidx = 0
         for i in xrange(grayscale.shape[0]):
             for j in xrange(grayscale.shape[1]):
                 for ref in context:
@@ -99,6 +102,9 @@ def main():
                 s = histogram[i,j,:].sum()
                 if s > 1.0:
                     histogram[i,j,:] /= s
+                pidx += 1
+                pbar.update(pidx)
+        pbar.finish()
     elif args.feature == 'variance-freq' or args.feature == 'variance-width':
         # Our probability distribution is defined by the number of windows from the corresponding
         # variance bin in each reference image.
