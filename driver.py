@@ -1,7 +1,12 @@
 import argparse
+import functools
+import multiprocessing
+from multiprocessing import sharedctypes
 import os
+import Queue
 import sys
 import traceback
+import warnings
 
 import cv2
 from cv2 import cv
@@ -12,6 +17,9 @@ from progressbar import Bar, ETA, Percentage, ProgressBar
 from cvutil.distributions import LabColorDistribution
 from cvutil.images import Image, BadImageError
 from cvutil.markov import MarkovGraph
+
+# This is to accomodate the large amount of data going into the KDTree
+sys.setrecursionlimit(1000000)
 
 
 def validate_args(args):
@@ -43,12 +51,75 @@ def configure_args():
         help='Number of color bins to use (default 75).')
     parser.add_argument('--smoothness', type=float, default=1.0,
         help='Weight on the smoothness term of the energy function (default 1.0).')
-    parser.add_argument('--feature', choices={'luminance', 'variance-freq', 'variance-width'},
-        default='luminance', help='Which feature of the image to use in colorization.')
+    parser.add_argument('--feature',
+        choices={'luminance', 'variance-freq', 'variance-width', '2-vector'}, default='luminance',
+        help='Which feature of the image to use in colorization.')
     parser.add_argument('--save-image', action='store_true',
         help='Saves the resulting image as result.jpg in the current directory.')
+    parser.add_argument('--num-neighbors', type=int, default=20, choices=range(20,100),
+        metavar='[20-100]', help='The value of K when running a nearest-neighbor algorithm.')
 
     return validate_args(parser.parse_args())
+
+
+def histogram_worker(indices):
+    '''Works on the chunk of the histogram defined by the given indices.'''
+    with warnings.catch_warnings():
+        # warnings.simplefilter('ignore', RuntimeWarning)
+        histogram = np.ctypeslib.as_array(global_histogram)
+
+    try:
+        for window in grayscale._windows[indices[0]:indices[1]]:
+            # Crunch on this window.
+            (i, j) = window.index
+            for ref in context_images:
+                local_histogram = np.zeros((args.num_bins,), dtype=float)
+                dists, neighbors = ref.k_nearest_windows(window.two_vector, k=args.num_neighbors)
+                counts = np.zeros((args.num_bins,), dtype=int)
+                for neighbor, dist in zip(neighbors, dists):
+                    bin_index = distribution.lookup(neighbor).index
+                    local_histogram[bin_index] += dist
+                    counts[bin_index] += 1
+                local_histogram[counts == 0] = np.inf
+                histogram[i,j,:] += (counts.astype(float) ** 2.0) / local_histogram
+            p_q.put(True)
+    except KeyboardInterrupt as ki:
+        return ki
+    except Exception as ex:
+        print 'Got an exception: %s' % str(ex)
+        print traceback.format_exc()
+        return ex
+    else:
+        return True
+
+
+def _init_process(shared_histogram, target, context, cmd_args, color_distribution, p_queue):
+    '''Configures a global initializer for each process so that shared memory is actually shared
+    and not pickled.
+    '''
+    # This is the shared-memory histogram used by each process.
+    global global_histogram
+    global_histogram = shared_histogram
+
+    # The image being colorized.
+    global grayscale
+    grayscale = target
+
+    # References to the color context images.
+    global context_images
+    context_images = context
+
+    # Command line arguments
+    global args
+    args = cmd_args
+
+    # The color distribution
+    global distribution
+    distribution = color_distribution
+
+    # Tracks progress
+    global p_q
+    p_q = p_queue
 
 
 def main():
@@ -124,12 +195,82 @@ def main():
             pbar.update(pidx)
             pidx += 1
         pbar.finish()
+    elif args.feature == '2-vector':
+        # Our probability is based on the nearest neighbors to the current feature vector.  For now
+        # we use the default value of K=20 for the nearest neighbor search.
+
+        # Configure the shared memory components
+        shape = grayscale.shape
+        p_q = multiprocessing.Queue()
+        c_histogram = np.ctypeslib.as_ctypes(
+            np.zeros((shape[0]-4, shape[1]-4, args.num_bins), dtype=float))
+        shared_histogram = sharedctypes.Array(c_histogram._type_, c_histogram, lock=False)
+        process_pool = multiprocessing.Pool(processes=multiprocessing.cpu_count(),
+            initializer=_init_process,
+            initargs=(shared_histogram, grayscale, context, args, color_distribution, p_q))
+
+        # Determine the chunk sizes
+        chunksize = len(grayscale) / multiprocessing.cpu_count()
+        idx = 0
+        chunks = []
+        while idx < len(grayscale):
+            chunks.append((idx, idx + chunksize))
+            idx += chunksize
+        if chunks[-1][1] > len(grayscale):
+            chunks[-1] = (chunks[-1][0], len(grayscale))
+
+        # Set up progress tracking
+        widgets = ['Generating: ', Percentage(), Bar(), ' ', ETA()]
+        pbar = ProgressBar(widgets=widgets, maxval=len(grayscale)).start()
+        pidx = 0
+
+        # Spin up the processes
+        try:
+            result = process_pool.map_async(histogram_worker, chunks)
+            while pidx < len(grayscale):
+                response = p_q.get(True, 5)  # Block until receiving a status update.
+                pidx += 1
+                pbar.update(pidx)
+            pbar.finish()
+            process_pool.close()
+            process_pool.join()
+            p_q.close()
+        except KeyboardInterrupt as ki:
+            process_pool.close()
+            p_q.close()
+            pbar.finish()
+            raise ki
+        except Queue.Empty:
+            process_pool.close()
+            p_q.close()
+            pbar.finish()
+            raise Exception('Queue timed out')
+        except Exception as ex:
+            process_pool.close()
+            p_q.close()
+            pbar.finish()
+            raise ex
+
+        # Recover the histogram
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', RuntimeWarning)
+            histogram = np.ctypeslib.as_array(shared_histogram)
+        histogram /= histogram.max()
 
     # This is where the real magic happens.
     print 'Building and Solving the Markov Random Field'
-    field = MarkovGraph(grayscale.raw[2:-2,2:-2], color_distribution, histogram,
-        smoothness=args.smoothness)
+    if args.feature == 'luminance':
+        field = MarkovGraph(grayscale.raw, color_distribution, 1.0 - histogram,
+            smoothness=args.smoothness)
+    elif args.feature == 'variance-freq' or args.feature == 'variance-width':
+        field = MarkovGraph(grayscale.raw[2:-2,2:-2], color_distribution, 1.0 - histogram,
+            smoothness=args.smoothness)
+    elif args.feature == '2-vector':
+        # Distances are already built in the correct order for feature vectors.
+        field = MarkovGraph(grayscale.raw[2:-2,2:-2], color_distribution, 1.0 - histogram,
+            smoothness=args.smoothness)
     labelled = field.solve()
+    # labelled = histogram.argmax(axis=2)
 
     # Build the color image from the given labelling.
     print 'Generating the Color Image'
@@ -137,7 +278,7 @@ def main():
     if args.feature == 'luminance':
         result = np.zeros((grayscale.shape[0], grayscale.shape[1], 3), dtype=np.uint8)
         np.copyto(result[...,0], grayscale.raw)
-    elif args.feature == 'variance-freq' or args.feature == 'variance-width':
+    else:
         result = np.zeros((grayscale.shape[0]-4, grayscale.shape[1]-4, 3), dtype=np.uint8)
         np.copyto(result[...,0], grayscale.raw[2:-2, 2:-2])
 

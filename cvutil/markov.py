@@ -41,14 +41,14 @@ class MarkovGraph(object):
         self._U[:,-1,0] = np.inf
         self._U[-1,:,1] = np.inf
 
-    def __init__(self, target_image, lab_distribution, probability_distribution, smoothness=1.0):
+    def __init__(self, target_image, lab_distribution, penalties, smoothness=1.0):
         '''Configure the markov random field using the given target and reference images, using the
         provided number of labels for the coloring.
         '''
         self._target = target_image
         self._distribution = lab_distribution
-        self._labels = range(probability_distribution.shape[-1])
-        self._D = 1.0 - probability_distribution
+        self._labels = range(penalties.shape[-1])
+        self._D = penalties
 
         # Configure the smoothness term.
         self._smoothness = smoothness

@@ -4,90 +4,90 @@ from matplotlib import pyplot as plt
 
 from util import max_index
 
+class _ColorBin(object):
+    '''Represents a bin containing several superpixels.
+
+    bounds: [(a_min, a_max), (b_min, b_max)]
+    '''
+    def __init__(self, superpixels, originating_split, dist, bounds=[(0, 255), (0, 255)]):
+        '''Generates a color bin from the given superpixel.'''
+        for sp in superpixels:
+            sp._color_bin = self
+        self._dim = (originating_split + 1) % 2
+        self._superpixels = sorted(superpixels, key=lambda x: x.median_color[self._dim])
+        self._dist = dist
+        self._bounds = bounds
+
+    def __len__(self):
+        return len(self._superpixels)
+
+    @property
+    def index(self):
+        if not hasattr(self, '_idx'):
+            raise AttributeError('No index has been set on this color bin yet.')
+        return self._idx
+
+    def set_index(self, idx):
+        self._idx = idx
+
+    def split(self):
+        '''Splits the color bin along the opposite axis from the previous split.'''
+        split_pixel = self._superpixels[len(self._superpixels) / 2]
+        if self._dim == 0:
+            self._dist._lines.append(
+                [(split_pixel.median_color[0], self._bounds[1][0]),
+                (split_pixel.median_color[0], self._bounds[1][1])]
+            )
+            bounds1 = [
+                (self._bounds[0][0], split_pixel.median_color[0]),  # Alphas cut maximum
+                (self._bounds[1][0], self._bounds[1][1])  # Betas are the same
+            ]
+            bounds2 = [
+                (split_pixel.median_color[0], self._bounds[0][1]),  # Alphas cut minimum
+                (self._bounds[1][0], self._bounds[1][1])  # Betas are the same
+            ]
+        else:
+            self._dist._lines.append(
+                [(self._bounds[0][0], split_pixel.median_color[1]),
+                (self._bounds[0][1], split_pixel.median_color[1])]
+            )
+            bounds1 = [
+                (self._bounds[0][0], self._bounds[0][1]),  # Alphas are the same
+                (self._bounds[1][0], split_pixel.median_color[1])  # Betas cut maximum
+            ]
+            bounds2 = [
+                (self._bounds[0][0], self._bounds[0][1]),  # Alphas are the same
+                (split_pixel.median_color[1], self._bounds[1][1])  # Betas cut minimum
+            ]
+
+        bin1 = _ColorBin(self._superpixels[:len(self._superpixels)/2], self._dim, self._dist,
+            bounds=bounds1)
+        bin2 = _ColorBin(self._superpixels[len(self._superpixels)/2:], self._dim, self._dist,
+            bounds=bounds2)
+        return (bin1, bin2)
+
+    @property
+    def average_color(self):
+        '''The average color in this bin.'''
+        # Check for a cached value.
+        if hasattr(self, '_rep_color'):
+            return self._rep_color
+
+        # Function for accumulating superpixel colors into the total point.
+        def accum(point, sp):
+            t1 = point[0] + sp.median_color[0]
+            t2 = point[1] + sp.median_color[1]
+            return (t1, t2)
+
+        # Calculate the representative totals
+        totals = reduce(lambda tot, sp: accum(tot, sp), self._superpixels, (0, 0))
+        self._rep_color = (totals[0] / len(self._superpixels), totals[1] / len(self._superpixels))
+        return self._rep_color
+
 class LabColorDistribution(object):
     '''Represents the two-dimensional color distribution using the alpha and beta channels of the
     Lab color space as axes.
     '''
-    class ColorBin(object):
-        '''Represents a bin containing several superpixels.
-
-        bounds: [(a_min, a_max), (b_min, b_max)]
-        '''
-        def __init__(self, superpixels, originating_split, dist, bounds=[(0, 255), (0, 255)]):
-            '''Generates a color bin from the given superpixel.'''
-            for sp in superpixels:
-                sp._color_bin = self
-            self._dim = (originating_split + 1) % 2
-            self._superpixels = sorted(superpixels, key=lambda x: x.median_color[self._dim])
-            self._dist = dist
-            self._bounds = bounds
-
-        def __len__(self):
-            return len(self._superpixels)
-
-        @property
-        def index(self):
-            if not hasattr(self, '_idx'):
-                raise AttributeError('No index has been set on this color bin yet.')
-            return self._idx
-
-        def set_index(self, idx):
-            self._idx = idx
-
-        def split(self):
-            '''Splits the color bin along the opposite axis from the previous split.'''
-            split_pixel = self._superpixels[len(self._superpixels) / 2]
-            if self._dim == 0:
-                self._dist._lines.append(
-                    [(split_pixel.median_color[0], self._bounds[1][0]),
-                    (split_pixel.median_color[0], self._bounds[1][1])]
-                )
-                bounds1 = [
-                    (self._bounds[0][0], split_pixel.median_color[0]),  # Alphas cut maximum
-                    (self._bounds[1][0], self._bounds[1][1])  # Betas are the same
-                ]
-                bounds2 = [
-                    (split_pixel.median_color[0], self._bounds[0][1]),  # Alphas cut minimum
-                    (self._bounds[1][0], self._bounds[1][1])  # Betas are the same
-                ]
-            else:
-                self._dist._lines.append(
-                    [(self._bounds[0][0], split_pixel.median_color[1]),
-                    (self._bounds[0][1], split_pixel.median_color[1])]
-                )
-                bounds1 = [
-                    (self._bounds[0][0], self._bounds[0][1]),  # Alphas are the same
-                    (self._bounds[1][0], split_pixel.median_color[1])  # Betas cut maximum
-                ]
-                bounds2 = [
-                    (self._bounds[0][0], self._bounds[0][1]),  # Alphas are the same
-                    (split_pixel.median_color[1], self._bounds[1][1])  # Betas cut minimum
-                ]
-
-            bin1 = LabColorDistribution.ColorBin(self._superpixels[:len(self._superpixels)/2],
-                self._dim, self._dist, bounds=bounds1)
-            bin2 = LabColorDistribution.ColorBin(self._superpixels[len(self._superpixels)/2:],
-                self._dim, self._dist, bounds=bounds2)
-            return (bin1, bin2)
-
-        @property
-        def average_color(self):
-            '''The average color in this bin.'''
-            # Check for a cached value.
-            if hasattr(self, '_rep_color'):
-                return self._rep_color
-
-            # Function for accumulating superpixel colors into the total point.
-            def accum(point, sp):
-                t1 = point[0] + sp.median_color[0]
-                t2 = point[1] + sp.median_color[1]
-                return (t1, t2)
-
-            # Calculate the representative totals
-            totals = reduce(lambda tot, sp: accum(tot, sp), self._superpixels, (0, 0))
-            self._rep_color = (totals[0] / len(self._superpixels), totals[1] / len(self._superpixels))
-            return self._rep_color
-
     def _configure_bins(self, first_bin, num_bins):
         '''Configures the color bins to have the desired number of bins using the provided initial
         all-encompassing bin.
@@ -116,7 +116,7 @@ class LabColorDistribution(object):
             self._superpixels += [sp for sp in image]
 
         # Actually generate the distribution here.
-        init_bin = LabColorDistribution.ColorBin(self._superpixels, 1, self)
+        init_bin = _ColorBin(self._superpixels, 1, self)
         self._lines = []
         self._configure_bins(init_bin, num_bins)
 

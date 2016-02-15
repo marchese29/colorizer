@@ -16,6 +16,8 @@ import cv2
 from cv2 import cv
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import stats as scistats
+from scipy.spatial import KDTree
 from skimage.segmentation import mark_boundaries
 from skimage.segmentation import slic
 
@@ -29,98 +31,106 @@ class NotColorError(AttributeError):
     '''Occurs when trying to perform color operations on a grayscale image.'''
     pass
 
+class _Window(object):
+    '''Represents a single 5x5 neighborhood in the image.'''
+    def __init__(self, index, image):
+        '''Instantiate a window at the given index of the given image.'''
+        self._image = image
+        self._index = index
+        self._i = self._index[0]
+        self._j = self._index[1]
+        if self._image._color:
+            self._window = self._image._labimage[self._i-2:self._i+3, self._j-2:self._j+3, :]
+        else:
+            self._window = self._image._raw[self._i-2:self._i+3, self._j-2:self._j+3]
+
+        if self._image._color:
+            lumin = np.median(self._window[...,0].astype(float))
+            alpha = np.median(self._window[...,1].astype(float))
+            beta = np.median(self._window[...,2].astype(float))
+            self._median_color = (alpha, beta)
+            self._variance = np.var(self._window[...,0].astype(float))
+        else:
+            lumin = np.median(self._window.astype(float))
+            self._variance = np.var(self._window.astype(float))
+        self._median_intensity = lumin
+
+        if self._image._stat == '2-vector':
+            vector = np.array((self._median_intensity, self._variance), dtype=float)
+            self._image._feature_vectors[self._i-2,self._j-2,:] = vector
+
+    @property
+    def median_color(self):
+        return self._median_color
+
+    @property
+    def median_intensity(self):
+        return self._median_intensity
+
+    @property
+    def variance(self):
+        return self._variance
+
+    @property
+    def window(self):
+        return self._window
+
+    @property
+    def two_vector(self):
+        '''The z-score normalized feature vector.'''
+        return self._image._feature_vectors[self._i-2,self._j-2,:]
+
+    @property
+    def index(self):
+        return (self._i - 2, self._j - 2)
+
+class _Superpixel(object):
+    '''Represents a single superpixel.'''
+    def __init__(self, image, indices, id):
+        '''Stores a reference to the containing image, as well as calculates the median
+        properties.
+        '''
+        self._id = id
+        self._image = image
+        self._indices = indices
+        self._coordinates = np.nonzero(indices)
+        self._size = np.count_nonzero(indices)
+
+        # Calculate the average color for this pixel
+        if image._color:
+            lumin = np.median(self._image._labimage[...,0][indices].astype(float))
+            alpha = np.median(self._image._labimage[...,1][indices].astype(float))
+            beta  = np.median(self._image._labimage[...,2][indices].astype(float))
+            self._median_color = (alpha, beta)
+        else:
+            lumin = np.median(self._image._raw[indices].astype(float))
+
+        self._median_intensity = lumin
+
+    def __eq__(self, other):
+        return self._id == other._id and self._image is other._image
+
+    @property
+    def median_color(self):
+        '''The median color for this superpixel represented as a tuple of floats: (alpha, beta).
+        '''
+        if self._image._color:
+            return self._median_color
+        else:
+            raise NotColorError('Attempted color access of grayscale superpixel.')
+
+    @property
+    def median_intensity(self):
+        '''The median intensity for this superpixel.'''
+        return self._median_intensity
+
+    @property
+    def indices(self):
+        '''The indices corresponding to this superpixel's sub-pixels.'''
+        return self._indices
+
 class Image(object):
     '''Represents a single image.'''
-
-    class Superpixel(object):
-        '''Represents a single superpixel.'''
-        def __init__(self, image, indices, id):
-            '''Stores a reference to the containing image, as well as calculates the median
-            properties.
-            '''
-            self._id = id
-            self._image = image
-            self._indices = indices
-            self._coordinates = np.nonzero(indices)
-            self._size = np.count_nonzero(indices)
-
-            # Calculate the average color for this pixel
-            if image._color:
-                lumin = np.median(self._image._labimage[...,0][indices].astype(float))
-                alpha = np.median(self._image._labimage[...,1][indices].astype(float))
-                beta  = np.median(self._image._labimage[...,2][indices].astype(float))
-                self._median_color = (alpha, beta)
-            else:
-                lumin = np.median(self._image._raw[indices].astype(float))
-
-            self._median_intensity = lumin
-
-        def __eq__(self, other):
-            return self._id == other._id and self._image is other._image
-
-        @property
-        def median_color(self):
-            '''The median color for this superpixel represented as a tuple of floats: (alpha, beta).
-            '''
-            if self._image._color:
-                return self._median_color
-            else:
-                raise NotColorError('Attempted color access of grayscale superpixel.')
-
-        @property
-        def median_intensity(self):
-            '''The median intensity for this superpixel.'''
-            return self._median_intensity
-
-        @property
-        def indices(self):
-            '''The indices corresponding to this superpixel's sub-pixels.'''
-            return self._indices
-
-    class Window(object):
-        '''Represents a single 5x5 neighborhood in the image.'''
-        def __init__(self, index, image):
-            '''Instantiate a window at the given index of the given image.'''
-            self._image = image
-            self._index = index
-            self._i = self._index[0]
-            self._j = self._index[1]
-            if self._image._color:
-                self._window = self._image._labimage[self._i-2:self._i+3, self._j-2:self._j+3, :]
-            else:
-                self._window = self._image._raw[self._i-2:self._i+3, self._j-2:self._j+3]
-
-            if image._color:
-                lumin = np.median(self._window[...,0].astype(float))
-                alpha = np.median(self._window[...,1].astype(float))
-                beta = np.median(self._window[...,2].astype(float))
-                self._median_color = (alpha, beta)
-                self._variance = np.var(self._window[...,0].astype(float))
-            else:
-                lumin = np.median(self._window.astype(float))
-                self._variance = np.var(self._window.astype(float))
-            self._median_intensity = lumin
-
-        @property
-        def median_color(self):
-            return self._median_color
-
-        @property
-        def median_intensity(self):
-            return self._median_intensity
-
-        @property
-        def variance(self):
-            return self._variance
-
-        @property
-        def window(self):
-            return self._window
-
-        @property
-        def index(self):
-            return (self._i - 2, self._j - 2)
-
     def _configure_superpixels(self):
         '''Configures the superpixels for this image.'''
         num_pixels = self._raw.shape[0] * self._raw.shape[1]
@@ -135,7 +145,7 @@ class Image(object):
         self._superpixels = []
         for i in xrange(np.max(self._segments)):
             indices = (self._segments == i)
-            self._superpixels.append(Image.Superpixel(self, indices, i))
+            self._superpixels.append(_Superpixel(self, indices, i))
 
     def _generate_grayscale_histogram(self):
         '''Configures the histogram for this image.'''
@@ -152,7 +162,16 @@ class Image(object):
         step = 5 if self._color else 1
         for i in range(2, self._raw.shape[0] - 2, step):
             for j in range(2, self._raw.shape[1] - 2, step):
-                self._windows.append(Image.Window((i, j), self))
+                self._windows.append(_Window((i, j), self))
+
+        if self._stat == '2-vector':
+            # First z-score normalize the individual dimensions of the feature vector image.
+            self._feature_vectors[...,0] = scistats.zscore(self._feature_vectors[...,0], axis=None)
+            self._feature_vectors[...,1] = scistats.zscore(self._feature_vectors[...,1], axis=None)
+            # Color images need to be searcheable.
+            if self._color:
+                self._window_tree = KDTree(np.array([w.two_vector for w in self._windows]))
+                self._windows_array = np.array(self._windows)
 
     def _generate_variance_histogram(self):
         '''Configures the variance histogram for this image.'''
@@ -208,6 +227,13 @@ class Image(object):
             # Generate the variance histogram.
             if self._color:
                 self._generate_variance_histogram()
+        elif stat == '2-vector':
+            # Configure the feature vector storage.
+            self._feature_vectors = np.zeros(
+                (self._raw.shape[0]-4, self._raw.shape[1]-4, 2), dtype=float)
+
+            # Calculate the pixel neighborhoods
+            self._configure_neighborhoods()
         else:
             raise ValueError('Do not recognize the statistic: %s' % stat)
 
@@ -215,14 +241,14 @@ class Image(object):
         '''You can iterate over the pixel groupings if you would like to.'''
         if self._stat == 'luminance':
             return iter(self._superpixels)
-        elif self._stat == 'variance-freq' or self._stat == 'variance-width':
+        elif self._stat == 'variance-freq' or self._stat == 'variance-width' or self._stat == '2-vector':
             return iter(self._windows)
 
     def __len__(self):
         '''The "length" of the image is represented by the number of superpixels in it.'''
         if self._stat == 'luminance':
             return len(self._superpixels)
-        elif self._stat == 'variance-freq' or self._stat == 'variance-width':
+        elif self._stat == 'variance-freq' or self._stat == 'variance-width' or self._stat == '2-vector':
             return len(self._windows)
 
     @property
@@ -249,6 +275,15 @@ class Image(object):
     def histogram(self):
         '''The grayscale distribution of the superpixel median intensities.'''
         return self._histogram * (1.0 / np.sum(self._histogram))
+
+    @property
+    def feature_vectors(self):
+        '''The feature vectors at each pixel.  This is a 3d matrix.  W x H x len(vector)'''
+        return self._feature_vectors
+
+    @property
+    def windows(self):
+        return self._windows
 
     def configure_normalized_distribution(self, image):
         '''Normalizes this images grayscale histogram.'''
@@ -285,6 +320,11 @@ class Image(object):
         '''
         indices = (self._variance_edges >= variance).nonzero()
         return self._variance_histogram[indices[0][0]] if len(indices[0]) > 0 else self._variance_histogram[49]
+
+    def k_nearest_windows(self, ref, k=20):
+        '''Finds the k nearest windows using euclidean distance on the feature vectors.'''
+        distances, indices = self._window_tree.query([ref], k=k)
+        return (distances[0], self._windows_array[indices][0])
 
     def graph_grayscale_distribution(self, normalized=False):
         '''Plots the grayscale distribution for this image.  If normalized is true, the most recent
